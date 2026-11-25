@@ -422,4 +422,174 @@ with tab3:
             key="t4_h_type",
         )
 
-        if sig_h_type == 
+        if sig_h_type == "Definida por Tramos (Personalizada)":
+            h_pieces_text = st.text_area(
+                "Ingresa tramos para h(t) (expr, t_min, t_max):",
+                value="1, 3, 5",
+                key="t4_h_text",
+            )
+            h_pieces = []
+            for line in h_pieces_text.strip().split("\n"):
+                if line.strip():
+                    parts = [p.strip() for p in line.split(",")]
+                    if len(parts) == 3:
+                        h_pieces.append((parts[0], (float(parts[1]), float(parts[2]))))
+            h_func = lambda t_arr: parse_piecewise_signal(h_pieces, t_arr)
+        elif sig_h_type == "Pulso Rectangular h(t) [3, 5] (Ejercicio)":
+            h_pieces = [("1", (3, 5))]
+            h_func = lambda t_arr: parse_piecewise_signal(h_pieces, t_arr)
+        elif sig_h_type == "Pulso Rectangular [0, 1]":
+            h_pieces = [("1", (0, 1))]
+            h_func = lambda t_arr: BasicSignal.rect(t_arr, center=0.5, width=1.0)
+        elif sig_h_type == "Escalón u(t)":
+            h_pieces = [("1", (0, 5))]
+            h_func = lambda t_arr: BasicSignal.step(t_arr)
+        else:
+            h_pieces = [("2*t", (0, 0.5)), ("2 - 2*t", (0.5, 1.0))]
+            h_func = lambda t_arr: BasicSignal.tri(t_arr, center=0.5, width=1.0)
+
+        t_shift = st.slider("Desplazamiento t (tiempo actual de convolución):", min_value=-4.0, max_value=9.0, value=3.5, step=0.1)
+
+    with col_c2:
+        tau_axis = np.linspace(-6, 9, 1500)
+        t_eval_axis = np.linspace(-4, 9, 350)
+
+        x_tau, h_shifted, prod_tau, y_curr = continuous_convolution_at_t(x_func, h_func, t_shift, tau_axis)
+        y_full_curve = compute_full_numerical_convolution(x_func, h_func, t_eval_axis, tau_axis)
+
+        fig_conv, axes = plt.subplots(4, 1, figsize=(9, 9), sharex=True)
+        fig_conv.subplots_adjust(hspace=0.35)
+
+        axes[0].plot(tau_axis, x_tau, color="#2563EB", linewidth=2, label="x(τ)")
+        axes[0].plot(tau_axis, h_func(tau_axis), color="#D97706", linewidth=2, linestyle="--", label="h(τ)")
+        axes[0].set_title("1. Señales Originales en la variable de integración τ", fontsize=10, fontweight="bold")
+        axes[0].legend(loc="upper right")
+        axes[0].grid(True, linestyle=":", alpha=0.6)
+
+        axes[1].plot(tau_axis, x_tau, color="#2563EB", linewidth=2, label="x(τ)")
+        axes[1].plot(tau_axis, h_shifted, color="#DC2626", linewidth=2, label=f"h({t_shift:.1f} - τ)")
+        axes[1].set_title(f"2. Inversión y Desplazamiento: h(t - τ) para t = {t_shift:.2f}", fontsize=10, fontweight="bold")
+        axes[1].legend(loc="upper right")
+        axes[1].grid(True, linestyle=":", alpha=0.6)
+
+        axes[2].plot(tau_axis, prod_tau, color="#059669", linewidth=2, label="Producto p(τ) = x(τ)·h(t-τ)")
+        axes[2].fill_between(tau_axis, 0, prod_tau, color="#34D399", alpha=0.5, label=f"Área = {y_curr:.4f}")
+        axes[2].set_title("3. Producto de Solapamiento p(τ) (Área sombreada)", fontsize=10, fontweight="bold")
+        axes[2].legend(loc="upper right")
+        axes[2].grid(True, linestyle=":", alpha=0.6)
+
+        axes[3].plot(t_eval_axis, y_full_curve, color="#7C3AED", linewidth=2.2, label="y(t) = (x * h)(t)")
+        axes[3].plot(t_shift, y_curr, "o", color="#DC2626", markersize=8, label=f"y({t_shift:.2f}) = {y_curr:.4f}")
+        axes[3].axvline(t_shift, color="#DC2626", linestyle=":", alpha=0.8)
+        axes[3].set_title("4. Resultado de la Integral de Convolución y(t)", fontsize=10, fontweight="bold")
+        axes[3].set_xlabel("Tiempo (t / τ)")
+        axes[3].legend(loc="upper right")
+        axes[3].grid(True, linestyle=":", alpha=0.6)
+
+        st.pyplot(fig_conv)
+
+        st.subheader("Expresión Analítica por Intervalos (SymPy)")
+        try:
+            spanish_latex, merged = symbolic_piecewise_convolution(x_pieces, h_pieces)
+            clean_latex = f"y(t) = {spanish_latex}".replace("$$", "").replace(r"\displaystyle", "").strip()
+            with st.container(border=True):
+                st.latex(clean_latex)
+
+            with st.expander("📋 Ver Expresión en Texto Plano (para copiar)"):
+                text_lines = []
+                for expr, (t1, t2) in merged:
+                    text_lines.append(f"  y(t) = {expr}    para {t1} <= t <= {t2}")
+                text_lines.append("  y(t) = 0    en otro caso")
+                st.code("\n".join(text_lines), language="text")
+        except Exception as e:
+            st.info(f"Visualizando resultado numérico de convolución ({e}).")
+
+        with st.expander("📐 Desarrollo Analítico Paso a Paso por Regiones de Tiempo (Procedimiento Teórico)"):
+            st.markdown(r"**Integral de convolución:** $y(t) = \int_{-\infty}^{\infty} x(\tau)\, h(t - \tau)\, d\tau$")
+            try:
+                steps = step_by_step_convolution(x_pieces, h_pieces)
+                if not steps:
+                    st.info("No se detectaron intervalos acotados de solapamiento para generar el desglose.")
+                else:
+                    for idx, stp in enumerate(steps, start=1):
+                        st.markdown(f"**Intervalo {idx}:** ${stp['t1_latex']} \\le t \\le {stp['t2_latex']}$")
+                        if not stp["terms"]:
+                            st.latex(r"y(t) = 0 \quad (\text{sin solapamiento})")
+                        else:
+                            for t_item in stp["terms"]:
+                                st.latex(
+                                    rf"x(\tau) = {t_item['x_tau_latex']}, \quad h(t - \tau) = {t_item['h_shifted_latex']}"
+                                )
+                                st.latex(
+                                    rf"\int_{{{t_item['low_latex']}}}^{{{t_item['high_latex']}}} "
+                                    rf"\left({t_item['prod_latex']}\right)\, d\tau "
+                                    rf"= \left[{t_item['ant_latex']}\right]_{{{t_item['low_latex']}}}^{{{t_item['high_latex']}}} "
+                                    rf"= {t_item['val_latex']}"
+                                )
+                            st.latex(rf"\Rightarrow y(t) = {stp['total_latex']}")
+                        st.divider()
+            except Exception as e:
+                st.warning(f"No se pudo generar el desglose simbólico paso a paso: {e}")
+
+
+# -----------------------------------------------------------------------------
+# TAB 4: ANÁLISIS DE SISTEMAS (OPCIONAL)
+# -----------------------------------------------------------------------------
+with tab4:
+    st.header("4. Análisis de Sistemas (Propiedades Básicas)")
+    st.write("Analiza las 5 propiedades fundamentales de sistemas SISO continuos: Linealidad, Invariancia Temporal, Causalidad, Memoria y Estabilidad BIBO.")
+
+    sys_choice = st.selectbox(
+        "Selecciona un sistema de estudio o ingresa uno personalizado:",
+        [
+            "y(t) = 3 * x(t)",
+            "y(t) = x(t - 2)",
+            "y(t) = x(2 * t)",
+            "y(t) = x(t)^2",
+            "y(t) = t * x(t)",
+            "y(t) = x(-t)",
+            "y(t) = Integral(x(tau), tau, -inf, t)",
+            "Sistema Personalizado (Ecuación)",
+        ],
+    )
+
+    if sys_choice == "Sistema Personalizado (Ecuación)":
+        custom_expr = st.text_input("Ingresa la ecuación del sistema en función de x(t) y t:", value="2*x(t) + 1")
+        analysis = SystemAnalyzer.analyze_custom(custom_expr)
+    else:
+        analysis = SystemAnalyzer.analyze_preset(sys_choice)
+
+    if analysis and "error" not in analysis:
+        st.subheader("Dictamen y Justificación Teórica de Propiedades")
+
+        p_lin, text_lin = analysis["linearity"]
+        p_ti, text_ti = analysis["time_invariance"]
+        p_cau, text_cau = analysis["causality"]
+        p_mem, text_mem = analysis["memory"]
+        p_sta, text_sta = analysis["stability"]
+
+        col_s1, col_s2 = st.columns(2)
+
+        with col_s1:
+            st.markdown(f"**1. Linealidad:** {'✅ LINEAL' if p_lin else '❌ NO LINEAL'}")
+            st.info(text_lin)
+
+            st.markdown(f"**2. Invariancia Temporal:** {'✅ INVARIANTE' if p_ti else '❌ VARIANTE'}")
+            st.info(text_ti)
+
+            st.markdown(f"**3. Causalidad:** {'✅ CAUSAL' if p_cau else '❌ NO CAUSAL'}")
+            st.info(text_cau)
+
+        with col_s2:
+            st.markdown(f"**4. Memoria:** {'🧠 CON MEMORIA (Dinámico)' if p_mem else '⚡ SIN MEMORIA (Instantáneo)'}")
+            st.info(text_mem)
+
+            st.markdown(f"**5. Estabilidad BIBO:** {'✅ ESTABLE' if p_sta else '❌ INESTABLE'}")
+            st.info(text_sta)
+
+        with st.expander("📐 Desarrollo Paso a Paso de la Evaluación de Propiedades"):
+            for item in SystemAnalyzer.step_by_step_system_analysis(analysis):
+                st.markdown(f"**{item['property']} — {item['verdict']}**")
+                st.latex(item["latex_test"])
+                st.write(item["detail"])
+                st.divider()
