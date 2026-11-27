@@ -1,9 +1,10 @@
+
 """
-Modulo de Convolucion Continua Numerica e Interactiva con Expresion Analitica por Tramos (SymPy).
+Módulo de Convolución Continua.
+Incluye cálculo numérico y desarrollo simbólico paso a paso.
 """
 
 import numpy as np
-import scipy.integrate as integrate
 import sympy as sp
 
 
@@ -15,192 +16,252 @@ def _trapz(y, x):
 
 def continuous_convolution_at_t(x_func, h_func, t_val, tau_arr):
     """
-    Calcula los componentes para un t de convolucion especifico:
-    - x(tau)
-    - h(t - tau)
-    - prod(tau) = x(tau) * h(t - tau)
-    - y(t) = integral x(tau) * h(t - tau) dtau
+    Calcula x(τ), h(t-τ), su producto y la integral numérica.
     """
     x_tau = x_func(tau_arr)
     h_flipped_shifted = h_func(t_val - tau_arr)
     product_tau = x_tau * h_flipped_shifted
     y_at_t = _trapz(product_tau, tau_arr)
+
     return x_tau, h_flipped_shifted, product_tau, y_at_t
 
 
-def compute_full_numerical_convolution(x_func, h_func, t_eval_arr, tau_arr):
+def compute_full_numerical_convolution(
+    x_func,
+    h_func,
+    t_eval_arr,
+    tau_arr,
+):
     """
-    Calcula la curva completa de convolucion y(t) para todos los valores en t_eval_arr.
+    Calcula la curva completa de convolución y(t).
     """
     y_full = np.zeros_like(t_eval_arr, dtype=float)
+
+    x_tau = x_func(tau_arr)
+
     for i, t_val in enumerate(t_eval_arr):
-        x_tau = x_func(tau_arr)
         h_tau = h_func(t_val - tau_arr)
         y_full[i] = _trapz(x_tau * h_tau, tau_arr)
+
     return y_full
 
 
-def resolve_limits(a, b, c, d, t1, t2):
-    t_sp = sp.Symbol("t")
-    t_mid = (t1 + t2) / 2
+def _sympify_signal(expression):
+    t = sp.Symbol("t", real=True)
 
-    if (t_mid - d) < a:
-        tau_low = a
-    else:
-        tau_low = t_sp - d
+    return sp.sympify(
+        expression,
+        locals={
+            "t": t,
+            "sin": sp.sin,
+            "cos": sp.cos,
+            "exp": sp.exp,
+            "sqrt": sp.sqrt,
+            "pi": sp.pi,
+        },
+    )
 
-    if (t_mid - c) > b:
-        tau_high = b
-    else:
-        tau_high = t_sp - c
 
-    return tau_low, tau_high
-
-
-def step_by_step_convolution(x_pieces, h_pieces):
+def symbolic_piecewise_convolution_steps(x_pieces, h_pieces):
     """
-    Genera una lista de pasos analiticos detallados por intervalo de t
-    a partir de los tramos de x(t) y h(t).
+    Desarrolla la convolución por intervalos.
+
+    Para cada intervalo de t muestra:
+    - Tramos que se solapan.
+    - x(τ).
+    - h(t-τ).
+    - Producto de ambas señales.
+    - Límites de integración.
+    - Antiderivada.
+    - Resultado de cada integral.
+    - Suma de contribuciones.
     """
-    t_sp = sp.Symbol("t", real=True)
-    tau_sp = sp.Symbol("tau", real=True)
 
-    t_points = set()
-    for _, (a, b) in x_pieces:
-        for _, (c, d) in h_pieces:
-            a_f, b_f, c_f, d_f = float(a), float(b), float(c), float(d)
-            t_points.update([
-                sp.Rational(str(a_f + c_f)),
-                sp.Rational(str(a_f + d_f)),
-                sp.Rational(str(b_f + c_f)),
-                sp.Rational(str(b_f + d_f)),
-            ])
+    t = sp.Symbol("t", real=True)
+    tau = sp.Symbol("tau", real=True)
 
-    t_sorted = sorted(list(t_points))
-    steps = []
+    breakpoints = set()
 
-    for i in range(len(t_sorted) - 1):
-        t1, t2 = t_sorted[i], t_sorted[i + 1]
-        t_mid = (t1 + t2) / 2
+    try:
+        for _, (a, b) in x_pieces:
+            for _, (c, d) in h_pieces:
 
-        active_terms = []
-        sub_integrals = []
+                a = sp.Rational(str(a))
+                b = sp.Rational(str(b))
+                c = sp.Rational(str(c))
+                d = sp.Rational(str(d))
 
-        for x_str, (a, b) in x_pieces:
-            for h_str, (c, d) in h_pieces:
-                a_r, b_r = sp.Rational(str(a)), sp.Rational(str(b))
-                c_r, d_r = sp.Rational(str(c)), sp.Rational(str(d))
+                breakpoints.update([
+                    a + c,
+                    a + d,
+                    b + c,
+                    b + d,
+                ])
 
-                low_val = max(a_r, t_mid - d_r)
-                high_val = min(b_r, t_mid - c_r)
+        sorted_points = sorted(breakpoints)
 
-                if high_val > low_val:
-                    tau_low, tau_high = resolve_limits(a_r, b_r, c_r, d_r, t1, t2)
-                    x_expr = sp.sympify(x_str, locals={"t": t_sp}).subs(t_sp, tau_sp)
-                    h_expr = sp.sympify(h_str, locals={"t": t_sp}).subs(t_sp, t_sp - tau_sp)
-                    prod = sp.expand(x_expr * h_expr)
-                    ant = sp.integrate(prod, tau_sp)
-                    val = sp.expand(ant.subs(tau_sp, tau_high) - ant.subs(tau_sp, tau_low))
+        all_steps = []
+        merged_results = []
 
-                    sub_integrals.append(val)
-                    active_terms.append({
-                        "x_tau_latex": sp.latex(x_expr),
-                        "h_shifted_latex": sp.latex(h_expr),
-                        "low_latex": sp.latex(tau_low),
-                        "high_latex": sp.latex(tau_high),
-                        "prod_latex": sp.latex(prod),
-                        "ant_latex": sp.latex(ant),
-                        "val_latex": sp.latex(val),
+        for index in range(len(sorted_points) - 1):
+
+            t1 = sorted_points[index]
+            t2 = sorted_points[index + 1]
+            midpoint = (t1 + t2) / 2
+
+            interval_steps = []
+            interval_total = sp.Integer(0)
+
+            for x_str, (a, b) in x_pieces:
+                for h_str, (c, d) in h_pieces:
+
+                    a = sp.Rational(str(a))
+                    b = sp.Rational(str(b))
+                    c = sp.Rational(str(c))
+                    d = sp.Rational(str(d))
+
+                    # Límites geométricos del solapamiento:
+                    # τ pertenece a [a,b] y también a [t-d,t-c].
+                    lower_candidate_1 = a
+                    lower_candidate_2 = t - d
+
+                    upper_candidate_1 = b
+                    upper_candidate_2 = t - c
+
+                    lower_mid = max(
+                        lower_candidate_1,
+                        lower_candidate_2.subs(t, midpoint),
+                    )
+
+                    upper_mid = min(
+                        upper_candidate_1,
+                        upper_candidate_2.subs(t, midpoint),
+                    )
+
+                    if upper_mid <= lower_mid:
+                        continue
+
+                    lower = (
+                        lower_candidate_1
+                        if lower_candidate_1 >= lower_candidate_2.subs(
+                            t, midpoint
+                        )
+                        else lower_candidate_2
+                    )
+
+                    upper = (
+                        upper_candidate_1
+                        if upper_candidate_1 <= upper_candidate_2.subs(
+                            t, midpoint
+                        )
+                        else upper_candidate_2
+                    )
+
+                    x_expr = _sympify_signal(x_str).subs(
+                        sp.Symbol("t", real=True), tau
+                    )
+
+                    h_expr = _sympify_signal(h_str).subs(
+                        sp.Symbol("t", real=True), t - tau
+                    )
+
+                    integrand = sp.expand(x_expr * h_expr)
+
+                    antiderivative = sp.integrate(integrand, tau)
+
+                    evaluated = sp.simplify(
+                        antiderivative.subs(tau, upper)
+                        - antiderivative.subs(tau, lower)
+                    )
+
+                    evaluated = sp.expand(evaluated)
+
+                    interval_total += evaluated
+
+                    interval_steps.append({
+                        "x_expression": x_expr,
+                        "h_expression": h_expr,
+                        "integrand": integrand,
+                        "lower": lower,
+                        "upper": upper,
+                        "antiderivative": antiderivative,
+                        "result": evaluated,
                     })
 
-        total_expr = sp.expand(sum(sub_integrals)) if sub_integrals else sp.S.Zero
-        steps.append({
-            "t1_latex": sp.latex(t1),
-            "t2_latex": sp.latex(t2),
-            "terms": active_terms,
-            "total_latex": sp.latex(total_expr),
-        })
+            interval_total = sp.simplify(interval_total)
 
-    return steps
+            if interval_steps:
+                all_steps.append({
+                    "interval": (t1, t2),
+                    "steps": interval_steps,
+                    "total": interval_total,
+                })
+
+                if interval_total != 0:
+                    merged_results.append(
+                        (interval_total, (t1, t2))
+                    )
+
+        # Unir intervalos consecutivos con la misma expresión.
+        merged = []
+
+        for expr, (t1, t2) in merged_results:
+
+            if (
+                merged
+                and sp.simplify(merged[-1][0] - expr) == 0
+                and merged[-1][1][1] == t1
+            ):
+                merged[-1] = (
+                    merged[-1][0],
+                    (merged[-1][1][0], t2),
+                )
+            else:
+                merged.append((expr, (t1, t2)))
+
+        return {
+            "interval_steps": all_steps,
+            "merged": merged,
+        }
+
+    except Exception:
+        return None
 
 
 def symbolic_piecewise_convolution(x_pieces, h_pieces):
     """
-    Obtiene la expresion analitica por intervalos (por tramos) de la convolucion (x * h)(t)
-    usando integracion simbolica exacta en SymPy con formato en espanol.
-
-    x_pieces: lista de tramos de x(t) [("expr_str", (a, b)), ...]
-    h_pieces: lista de tramos de h(t) [("expr_str", (c, d)), ...]
+    Mantiene la interfaz anterior:
+    devuelve LaTeX y los intervalos resultantes.
     """
-    t_sp = sp.Symbol("t")
-    tau_sp = sp.Symbol("tau")
 
-    t_points = set()
-    for _, (a, b) in x_pieces:
-        for _, (c, d) in h_pieces:
-            a_f, b_f, c_f, d_f = float(a), float(b), float(c), float(d)
-            t_points.update([
-                sp.Rational(str(a_f + c_f)),
-                sp.Rational(str(a_f + d_f)),
-                sp.Rational(str(b_f + c_f)),
-                sp.Rational(str(b_f + d_f)),
-            ])
+    detailed = symbolic_piecewise_convolution_steps(
+        x_pieces,
+        h_pieces,
+    )
 
-    t_sorted = sorted(list(t_points))
-    results = []
+    if detailed is None:
+        raise ValueError(
+            "No se pudo calcular la convolución simbólica."
+        )
 
-    for i in range(len(t_sorted) - 1):
-        t1, t2 = t_sorted[i], t_sorted[i + 1]
-        t_mid = (t1 + t2) / 2
+    t = sp.Symbol("t", real=True)
+    merged = detailed["merged"]
 
-        sub_integrals = []
-        for x_str, (a, b) in x_pieces:
-            for h_str, (c, d) in h_pieces:
-                a_r, b_r = sp.Rational(str(a)), sp.Rational(str(b))
-                c_r, d_r = sp.Rational(str(c)), sp.Rational(str(d))
-
-                low_val = max(a_r, t_mid - d_r)
-                high_val = min(b_r, t_mid - c_r)
-
-                if high_val > low_val:
-                    tau_low, tau_high = resolve_limits(a_r, b_r, c_r, d_r, t1, t2)
-                    x_expr = sp.sympify(x_str, locals={"t": t_sp}).subs(t_sp, tau_sp)
-                    h_expr = sp.sympify(h_str, locals={"t": t_sp}).subs(t_sp, t_sp - tau_sp)
-                    prod = sp.expand(x_expr * h_expr)
-                    ant = sp.integrate(prod, tau_sp)
-                    val = sp.expand(ant.subs(tau_sp, tau_high) - ant.subs(tau_sp, tau_low))
-                    sub_integrals.append(val)
-
-        if sub_integrals:
-            total_interval_expr = sp.expand(sum(sub_integrals))
-        else:
-            total_interval_expr = sp.S.Zero
-
-        if total_interval_expr != 0:
-            results.append((total_interval_expr, (t1, t2)))
-
-    merged = []
-    for expr, (t1, t2) in results:
-        if merged and sp.simplify(merged[-1][0] - expr) == 0:
-            merged[-1] = (merged[-1][0], (merged[-1][1][0], t2))
-        else:
-            merged.append((expr, (t1, t2)))
-
-    # Formatear a cadena LaTeX en espanol impecable
     lines = []
+
     for expr, (t1, t2) in merged:
-        expr_latex = sp.latex(expr)
-        lines.append(f"{expr_latex}, & \\text{{para }} {sp.latex(t1)} \\le t \\le {sp.latex(t2)}")
+        lines.append(
+            f"{sp.latex(expr)}, & "
+            f"\\text{{para }} {sp.latex(t1)} "
+            f"\\le t \\le {sp.latex(t2)}"
+        )
+
     lines.append("0, & \\text{en otro caso}")
 
-    spanish_latex = "\\begin{cases}\n" + " \\\\[6pt]\n".join(lines) + "\n\\end{cases}"
-
-    # SymPy Piecewise object
-    pw_args = []
-    for expr, (t1, t2) in merged:
-        cond = sp.And(t_sp >= t1, t_sp <= t2)
-        pw_args.append((expr, cond))
-    pw_args.append((0, True))
-    pw_sym = sp.Piecewise(*pw_args)
+    spanish_latex = (
+        "\\begin{cases}\n"
+        + " \\\\[6pt]\n".join(lines)
+        + "\n\\end{cases}"
+    )
 
     return spanish_latex, merged
