@@ -33,6 +33,10 @@ from modules.convolution import (
     compute_full_numerical_convolution,
     symbolic_piecewise_convolution,
 )
+from modules.fourier_series import (
+    compute_fourier_series_data,
+    evaluate_periodic_piecewise,
+)
 
 st.set_page_config(
     page_title="Calculadora de Señales y Sistemas Continuos",
@@ -94,12 +98,13 @@ def render_math_box(latex_str, label=""):
     st.latex(clean_latex)
 
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "1️⃣ Señales Básicas, Impulsos y Dobletes",
     "2️⃣ Señales de Potencia y Energía",
     "3️⃣ Operaciones y Simetría",
     "4️⃣ Convolución Continua",
     "5️⃣ Sistemas (Opcional)",
+    "6️⃣ Series de Fourier (STF y SEF)",
 ])
 
 t_domain = np.linspace(-10, 10, 2000)
@@ -756,6 +761,7 @@ with tab5:
 
             st.markdown(f"**5. Estabilidad BIBO:** {'✅ ESTABLE' if p_sta else '❌ INESTABLE'}")
             st.info(text_sta)
+
 
 # -----------------------------------------------------------------------------
 # TAB 6: SERIES DE FOURIER (SEF Y STF)
