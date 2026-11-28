@@ -756,3 +756,133 @@ with tab5:
 
             st.markdown(f"**5. Estabilidad BIBO:** {'✅ ESTABLE' if p_sta else '❌ INESTABLE'}")
             st.info(text_sta)
+
+# -----------------------------------------------------------------------------
+# TAB 6: SERIES DE FOURIER (SEF Y STF)
+# -----------------------------------------------------------------------------
+with tab6:
+    st.header("6. Series de Fourier (Exponencial y Trigonométrica)")
+    st.write(
+        "Calcula los coeficientes de la **SEF** ($X_k$) y la **STF** ($X_0, X_{C_k}, X_{S_k}$), "
+        "la aproximación con $N$ armónicos, los espectros de magnitud y fase, y la potencia por Parseval."
+    )
+
+    col_fs1, col_fs2 = st.columns([1, 2])
+
+    with col_fs1:
+        fs_preset = st.selectbox(
+            "Señal periódica de ejemplo o personalizada:",
+            [
+                "Tren de pulsos rectangulares en [-1, 1] (T0 = 2)",
+                "Onda triangular periódica en [-1, 1] (T0 = 2)",
+                "Onda diente de sierra en [0, 2] (T0 = 2)",
+                "Personalizada por tramos en un periodo",
+            ],
+            key="fs_preset",
+        )
+
+        if fs_preset == "Tren de pulsos rectangulares en [-1, 1] (T0 = 2)":
+            fs_t0_start, fs_t0_end = -1.0, 1.0
+            fs_pieces_default = "1, -0.5, 0.5"
+        elif fs_preset == "Onda triangular periódica en [-1, 1] (T0 = 2)":
+            fs_t0_start, fs_t0_end = -1.0, 1.0
+            fs_pieces_default = "1 + t, -1, 0\n1 - t, 0, 1"
+        elif fs_preset == "Onda diente de sierra en [0, 2] (T0 = 2)":
+            fs_t0_start, fs_t0_end = 0.0, 2.0
+            fs_pieces_default = "t, 0, 2"
+        else:
+            fs_t0_start, fs_t0_end = -1.0, 1.0
+            fs_pieces_default = "1, -0.5, 0.5"
+
+        c_p1, c_p2 = st.columns(2)
+        per_start = c_p1.number_input("Inicio periodo t_a:", value=fs_t0_start, step=0.5, key="fs_per_a")
+        per_end = c_p2.number_input("Fin periodo t_b:", value=fs_t0_end, step=0.5, key="fs_per_b")
+
+        fs_text = st.text_area(
+            "Tramos dentro del periodo (expr, t_min, t_max):",
+            value=fs_pieces_default,
+            key="fs_pieces_text",
+        )
+        fs_pieces = []
+        for line in fs_text.strip().split("\n"):
+            if line.strip():
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) == 3:
+                    fs_pieces.append((parts[0], (float(parts[1]), float(parts[2]))))
+
+        max_k_harm = st.slider("Rango de armónicos |k| para espectros:", min_value=1, max_value=10, value=5, key="fs_max_k")
+        n_synth = st.slider("Número de armónicos N para reconstruir x_N(t):", min_value=1, max_value=25, value=7, key="fs_n_synth")
+
+    with col_fs2:
+        try:
+            fs_data = compute_fourier_series_data(
+                fs_pieces,
+                t0_start=per_start,
+                t0_end=per_end,
+                max_k=max_k_harm,
+                n_harmonics=n_synth,
+            )
+
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Periodo T0", f"{fs_data['T0_num']:.4f}")
+            m2.metric("Frecuencia ω0", f"{fs_data['omega0_num']:.4f} rad/s")
+            m3.metric("Potencia P_x (tiempo)", f"{fs_data['Px_num']:.4f}")
+            m4.metric(f"Parseval (|k|≤{max_k_harm})", f"{fs_data['parseval_partial_num']:.4f}")
+
+            st.markdown("**Parámetros fundamentales y coeficiente DC ($X_0$):**")
+            st.latex(
+                r"T_0 = " + sp.latex(fs_data["T0"])
+                + r", \quad f_0 = " + sp.latex(fs_data["f0"])
+                + r", \quad \omega_0 = " + sp.latex(fs_data["omega0"])
+                + r", \quad X_0 = " + sp.latex(fs_data["X0"])
+            )
+
+            st.markdown("**Fórmula general de la SEF ($X_k$ para $k \neq 0$):**")
+            st.latex(
+                r"X_k = \frac{1}{T_0}\int_{" + sp.latex(fs_data["a"]) + r"}^{" + sp.latex(fs_data["b"])
+                + r"} \tilde{x}(t)e^{-jk\omega_0 t}\,dt = " + sp.latex(fs_data["Xk_general"])
+            )
+
+            t_fs_axis = np.linspace(per_start - 1.5 * fs_data["T0_num"], per_end + 1.5 * fs_data["T0_num"], 1800)
+            y_periodic_true = evaluate_periodic_piecewise(fs_pieces, per_start, per_end, t_fs_axis)
+            y_periodic_synth = np.asarray(fs_data["approx_func"](t_fs_axis), dtype=float)
+
+            fig_fs, ax_fs = plt.subplots(figsize=(8.5, 3.6))
+            ax_fs.plot(t_fs_axis, y_periodic_true, color="#2563EB", linewidth=2, label="Señal periódica x̃(t)")
+            ax_fs.plot(t_fs_axis, y_periodic_synth, color="#DC2626", linewidth=1.8, linestyle="--", label=f"Aproximación N={n_synth}")
+            ax_fs.axhline(0, color="black", linewidth=0.8)
+            ax_fs.set_title("Señal Periódica y Síntesis con N Armónicos", fontsize=10.5, fontweight="bold")
+            ax_fs.set_xlabel("Tiempo t (s)")
+            ax_fs.grid(True, linestyle=":", alpha=0.6)
+            ax_fs.legend(loc="upper right")
+            st.pyplot(fig_fs)
+
+            k_vals_arr = np.array(fs_data["k_range"], dtype=float)
+            mag_vals_arr = np.array([fs_data["harmonics"][int(kv)]["mag_num"] for kv in k_vals_arr])
+            phase_vals_arr = np.array([fs_data["harmonics"][int(kv)]["phase_num"] for kv in k_vals_arr])
+
+            fig_sp, (ax_m, ax_ph) = plt.subplots(1, 2, figsize=(9, 3.2))
+            ax_m.stem(k_vals_arr, mag_vals_arr, basefmt=" ")
+            ax_m.set_title("Espectro de Magnitud |X_k|", fontsize=10, fontweight="bold")
+            ax_m.set_xlabel("Armónico k")
+            ax_m.grid(True, linestyle=":", alpha=0.6)
+
+            ax_ph.stem(k_vals_arr, phase_vals_arr, basefmt=" ")
+            ax_ph.set_title("Espectro de Fase ∠X_k (rad)", fontsize=10, fontweight="bold")
+            ax_ph.set_xlabel("Armónico k")
+            ax_ph.grid(True, linestyle=":", alpha=0.6)
+
+            plt.tight_layout()
+            st.pyplot(fig_sp)
+
+            with st.expander("📋 Coeficientes SEF (X_k) y STF (X_{C_k}, X_{S_k}) por armónico"):
+                for kv in range(1, max_k_harm + 1):
+                    item_k = fs_data["harmonics"][kv]
+                    st.latex(
+                        f"k={kv}: \\quad X_{{{kv}}} = {sp.latex(item_k['Xk'])}, "
+                        f"\\quad X_{{C_{kv}}} = {sp.latex(item_k['XC'])}, "
+                        f"\\quad X_{{S_{kv}}} = {sp.latex(item_k['XS'])}"
+                    )
+
+        except Exception as exc:
+            st.error(f"No se pudo calcular la Serie de Fourier: {exc}")
