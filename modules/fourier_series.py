@@ -8,8 +8,9 @@ import sympy as sp
 
 
 def _parse_expr(expr_str, t_sym):
+    cleaned = (expr_str or "0").strip().replace("^", "**")
     expr = sp.sympify(
-        expr_str,
+        cleaned,
         locals={
             "t": t_sym,
             "sin": sp.sin,
@@ -22,6 +23,18 @@ def _parse_expr(expr_str, t_sym):
         },
     )
     return sp.nsimplify(expr, rational=True)
+
+
+def _safe_float(sym_expr, default=0.0):
+    try:
+        val = sp.N(sym_expr)
+        if val.is_number:
+            re_val = float(sp.re(val))
+            if np.isfinite(re_val):
+                return re_val
+    except Exception:
+        pass
+    return float(default)
 
 
 def compute_fourier_series_data(pieces, t0_start, t0_end, max_k=5, n_harmonics=7):
@@ -53,11 +66,14 @@ def compute_fourier_series_data(pieces, t0_start, t0_end, max_k=5, n_harmonics=7
                 (expr, sp.nsimplify(seg_low, rational=True), sp.nsimplify(seg_high, rational=True))
             )
 
+    if not parsed_pieces:
+        raise ValueError("No hay tramos válidos dentro del periodo indicado.")
+
     # Valor promedio / componente DC: X_0
     x0_integral_sum = sp.Integer(0)
     x0_steps = []
     for idx, (expr, seg_a, seg_b) in enumerate(parsed_pieces, start=1):
-        val_seg = sp.simplify(sp.integrate(expr, (t, seg_a, seg_b)))
+        val_seg = sp.simplify(sp.integrate(expr, (t, seg_a, seg_b)).doit())
         x0_integral_sum += val_seg
         x0_steps.append({
             "index": idx,
@@ -71,9 +87,9 @@ def compute_fourier_series_data(pieces, t0_start, t0_end, max_k=5, n_harmonics=7
     # Fórmula general simbólica de X_k para k != 0
     xk_general_terms = []
     for expr, seg_a, seg_b in parsed_pieces:
-        term_int = sp.integrate(expr * sp.exp(-sp.I * k * omega0 * t), (t, seg_a, seg_b))
+        term_int = sp.integrate(expr * sp.exp(-sp.I * k * omega0 * t), (t, seg_a, seg_b)).doit()
         xk_general_terms.append(sp.simplify(term_int / T0))
-    Xk_general = sp.simplify(sum(xk_general_terms)) if xk_general_terms else sp.Integer(0)
+    Xk_general = sp.simplify(sum(xk_general_terms))
 
     # Coeficientes puntuales para k en [-max_k, max_k]
     harmonics_dict = {}
@@ -86,7 +102,7 @@ def compute_fourier_series_data(pieces, t0_start, t0_end, max_k=5, n_harmonics=7
             val_acc = sp.Integer(0)
             for expr, seg_a, seg_b in parsed_pieces:
                 integrand_k = expr * sp.exp(-sp.I * k_val * omega0 * t)
-                val_acc += sp.integrate(integrand_k, (t, seg_a, seg_b))
+                val_acc += sp.integrate(integrand_k, (t, seg_a, seg_b)).doit()
             c_val = sp.simplify(val_acc / T0)
 
         re_part = sp.simplify(sp.re(c_val))
@@ -99,8 +115,8 @@ def compute_fourier_series_data(pieces, t0_start, t0_end, max_k=5, n_harmonics=7
             "Xk": c_val,
             "mag": mag_val,
             "phase": phase_val,
-            "mag_num": float(sp.N(mag_val)),
-            "phase_num": float(sp.N(phase_val)),
+            "mag_num": _safe_float(mag_val),
+            "phase_num": _safe_float(phase_val),
             "XC": sp.simplify(2 * re_part) if k_val > 0 else sp.Integer(0),
             "XS": sp.simplify(-2 * im_part) if k_val > 0 else sp.Integer(0),
         }
@@ -108,23 +124,29 @@ def compute_fourier_series_data(pieces, t0_start, t0_end, max_k=5, n_harmonics=7
     # Potencia promedio por periodo y suma de Parseval hasta max_k
     power_integral_sum = sp.Integer(0)
     for expr, seg_a, seg_b in parsed_pieces:
-        power_integral_sum += sp.integrate(sp.Abs(expr) ** 2, (t, seg_a, seg_b))
+        power_integral_sum += sp.integrate(sp.Abs(expr) ** 2, (t, seg_a, seg_b)).doit()
     Px_exact = sp.simplify(power_integral_sum / T0)
-    Px_num = float(sp.N(Px_exact))
+    Px_num = _safe_float(Px_exact)
 
     parseval_partial = sp.simplify(
         sum(harmonics_dict[kv]["mag"] ** 2 for kv in k_range)
     )
-    parseval_partial_num = float(sp.N(parseval_partial))
+    parseval_partial_num = _safe_float(parseval_partial)
 
-    # Síntesis numérica con N armónicos (k = -N ... N)
+    # Síntesis con N armónicos
     n_harm = max(0, int(n_harmonics))
     t_sym_local = sp.Symbol("t", real=True)
     approx_expr = sp.simplify(X0)
     for kv in range(1, n_harm + 1):
-        xc_k = harmonics_dict.get(kv, {}).get("XC", sp.Integer(0))
-        xs_k = harmonics_dict.get(kv, {}).get("XS", sp.Integer(0))
-        approx_expr += sp.simplify(xc_k * sp.cos(kv * omega0 * t_sym_local) + xs_k * sp.sin(kv * omega0 * t_sym_local))
+        val_acc_k = sp.Integer(0)
+        for expr, seg_a, seg_b in parsed_pieces:
+            val_acc_k += sp.integrate(expr * sp.exp(-sp.I * kv * omega0 * t), (t, seg_a, seg_b)).doit()
+        ck_synth = sp.simplify(val_acc_k / T0)
+        xc_k = sp.simplify(2 * sp.re(ck_synth))
+        xs_k = sp.simplify(-2 * sp.im(ck_synth))
+        approx_expr += sp.simplify(
+            xc_k * sp.cos(kv * omega0 * t_sym_local) + xs_k * sp.sin(kv * omega0 * t_sym_local)
+        )
 
     approx_func = sp.lambdify(t_sym_local, sp.re(approx_expr), modules=["numpy", "math"])
 
@@ -132,10 +154,10 @@ def compute_fourier_series_data(pieces, t0_start, t0_end, max_k=5, n_harmonics=7
         "a": a_per,
         "b": b_per,
         "T0": T0,
-        "T0_num": float(sp.N(T0)),
+        "T0_num": _safe_float(T0, default=1.0),
         "f0": f0,
         "omega0": omega0,
-        "omega0_num": float(sp.N(omega0)),
+        "omega0_num": _safe_float(omega0, default=1.0),
         "X0": X0,
         "x0_steps": x0_steps,
         "Xk_general": Xk_general,
